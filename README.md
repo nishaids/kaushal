@@ -4,6 +4,14 @@
 
 Built for GatewayHacks 2026, Track 2 — Equity in Education.
 
+**Live:** <https://kaushal-theta.vercel.app> — press *Open the demo*, no sign-up.
+**Source:** <https://github.com/nishaids/kaushal>
+
+The live deployment runs on the built-in local data driver with no AI keys, so
+every proposal you see there comes from the deterministic pixel measurements and
+is labelled as measured. That is the product's honest degrade path, not a mock —
+see [Degrading honestly](#degrading-honestly).
+
 ---
 
 ## The problem
