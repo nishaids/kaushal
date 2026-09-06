@@ -57,6 +57,8 @@ function work(id: string, daysAgo: number, value: number, confirmed = true): Sco
     assignment_id: null,
     notes: null,
     is_calibration: false,
+    difficulty: null,
+    quality: null,
     metrics: null,
     created_at: at,
     scores,

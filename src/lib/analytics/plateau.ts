@@ -1,5 +1,5 @@
 import { PLATEAU } from '../constants'
-import { DIMENSIONS, RUBRIC } from '../rubric'
+import { RUBRIC, humaniseKey } from '../rubric'
 import type { Dimension } from '../rubric'
 import type { PlateauFinding, ScoredWork, TrajectoryPoint } from '../types'
 import { longDate, pluralise } from '../utils/format'
@@ -68,8 +68,14 @@ export function detectPlateaus(works: ScoredWork[], now: Date = new Date()): Pla
 
   // One fit per dimension over the window. null means the dimension was not
   // scored often enough in this window to fit anything.
+  // Keys present in the record rather than a fixed list: dimensions are
+  // academy-defined, and a hard-coded set silently ignores every rubric that
+  // is not the drawing one.
+  const keys = new Set<Dimension>()
+  for (const p of points) for (const k of Object.keys(p.values)) keys.add(k)
+
   const windowSlopes = new Map<Dimension, number | null>()
-  for (const d of DIMENSIONS) {
+  for (const d of keys) {
     const series = seriesFor(windowPoints, d)
     windowSlopes.set(
       d,
@@ -80,13 +86,13 @@ export function detectPlateaus(works: ScoredWork[], now: Date = new Date()): Pla
   const nowMs = now.getTime()
   const findings: PlateauFinding[] = []
 
-  for (const dimension of DIMENSIONS) {
+  for (const dimension of keys) {
     const slope = windowSlopes.get(dimension) ?? null
     if (slope === null) continue
     if (slope >= PLATEAU.flatSlope) continue
 
     const peers: number[] = []
-    for (const other of DIMENSIONS) {
+    for (const other of keys) {
       if (other === dimension) continue
       const s = windowSlopes.get(other) ?? null
       if (s !== null) peers.push(s)
@@ -112,7 +118,7 @@ export function detectPlateaus(works: ScoredWork[], now: Date = new Date()): Pla
           ? 'medium'
           : 'low'
 
-    const label = RUBRIC[dimension].longLabel
+    const label = RUBRIC[dimension]?.longLabel ?? humaniseKey(dimension)
     // Falling and flat are different problems, and the boundary between them
     // is the same flatness threshold used to raise the flag in the first place.
     const stalled =
@@ -140,7 +146,7 @@ export function detectPlateaus(works: ScoredWork[], now: Date = new Date()): Pla
 
 /** The longer version, for the tooltip behind the one-sentence flag. */
 export function explainPlateau(f: PlateauFinding): string {
-  const label = RUBRIC[f.dimension].longLabel
+  const label = RUBRIC[f.dimension]?.longLabel ?? humaniseKey(f.dimension)
   return (
     `We fit a line through the last ${pluralise(f.window, 'work')}. ` +
     `${label} is moving at ${rate(f.slope)} points a week; the other four average ` +

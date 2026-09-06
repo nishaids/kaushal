@@ -16,6 +16,7 @@ import type {
   Student,
   StudentStatus,
   Work,
+  WorkQuality,
 } from '../types'
 
 /**
@@ -103,6 +104,10 @@ export interface DataDriver {
     notes?: string | null
     isCalibration?: boolean
     metrics?: ImageMetrics | null
+    /** Relative to the student's baseline. 1 when not stated. */
+    difficulty?: number | null
+    /** Verdict from the media quality gate, measured before assessment. */
+    quality?: WorkQuality | null
   }): Promise<Work>
   deleteWork(academyId: string, workId: string): Promise<void>
 
@@ -149,6 +154,7 @@ export interface DataDriver {
     studentId: string
     targetDimension: Dimension
     brief: AssignmentBrief
+    difficulty?: number
   }): Promise<Assignment>
   updateAssignment(
     academyId: string,

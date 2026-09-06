@@ -1,4 +1,3 @@
-import { DIMENSIONS } from '../rubric'
 import type { Dimension } from '../rubric'
 import type {
   Score,
@@ -62,9 +61,10 @@ export function toTrajectoryPoints(works: ScoredWork[]): TrajectoryPoint[] {
     const confirmed: Partial<Record<Dimension, boolean>> = {}
     let confirmedCount = 0
 
-    for (const d of DIMENSIONS) {
-      const s = chosen.get(d)
-      if (!s) continue
+    // Iterate the dimensions actually present on the work, not a fixed list.
+    // Dimensions are academy-defined, so anything keyed off a hard-coded set
+    // silently drops every rubric that is not the drawing one.
+    for (const [d, s] of chosen) {
       const v = effectiveScore(s)
       if (v !== null) values[d] = v
       const inked = isConfirmed(s)
@@ -79,7 +79,7 @@ export function toTrajectoryPoints(works: ScoredWork[]): TrajectoryPoint[] {
       thumb_url: work.thumb_url,
       values,
       confirmed,
-      fullyConfirmed: confirmedCount === DIMENSIONS.length,
+      fullyConfirmed: chosen.size > 0 && confirmedCount === chosen.size,
     }
   })
 }
@@ -123,10 +123,14 @@ export function analyseTrajectory(works: ScoredWork[]): TrajectoryAnalysis {
 
   const latest: Partial<Record<Dimension, number>> = {}
   const series = new Map<Dimension, Array<{ t: number; v: number }>>()
-  for (const d of DIMENSIONS) series.set(d, [])
+  // Every key seen anywhere in the record, so a rubric edit mid-term still
+  // draws the dimensions that were scored before the change.
+  const keys = new Set<Dimension>()
+  for (const p of points) for (const k of Object.keys(p.values)) keys.add(k)
+  for (const d of keys) series.set(d, [])
 
   for (const p of points) {
-    for (const d of DIMENSIONS) {
+    for (const d of keys) {
       const v = p.values[d]
       if (v === undefined) continue
       latest[d] = v
@@ -135,7 +139,7 @@ export function analyseTrajectory(works: ScoredWork[]): TrajectoryAnalysis {
   }
 
   const slopes: Partial<Record<Dimension, number>> = {}
-  for (const d of DIMENSIONS) {
+  for (const d of keys) {
     const s = series.get(d)
     if (!s || s.length === 0) continue
     slopes[d] = linearSlopePerWeek(s)
@@ -144,7 +148,7 @@ export function analyseTrajectory(works: ScoredWork[]): TrajectoryAnalysis {
   // Lowest latest score wins; a tie goes to whichever is climbing more slowly,
   // because that is the one that will still be lowest next month.
   let weakest: { dimension: Dimension; value: number } | null = null
-  for (const d of DIMENSIONS) {
+  for (const d of keys) {
     const value = latest[d]
     if (value === undefined) continue
     if (weakest === null || value < weakest.value) {

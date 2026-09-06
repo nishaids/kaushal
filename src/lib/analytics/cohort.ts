@@ -1,5 +1,4 @@
 import { DORMANT_DAYS, PLATEAU } from '../constants'
-import { DIMENSIONS } from '../rubric'
 import type { Dimension } from '../rubric'
 import type { Alert, CohortRow, ScoredWork, Student } from '../types'
 import { pluralise } from '../utils/format'
@@ -78,15 +77,28 @@ export function buildCohortRows(input: {
       ? Math.max(0, Math.floor((nowMs - last.t) / DAY))
       : null
 
+    // The keys this student has actually been scored on, rather than a fixed
+    // list — an academy's rubric may have three dimensions or nine.
+    const dimensionKeys: Dimension[] = []
+    const seenKeys = new Set<Dimension>()
+    for (const p of points) {
+      for (const k of Object.keys(p.values)) {
+        if (!seenKeys.has(k)) {
+          seenKeys.add(k)
+          dimensionKeys.push(k)
+        }
+      }
+    }
+
     const latest: Partial<Record<Dimension, number>> = {}
     for (const p of points) {
-      for (const d of DIMENSIONS) {
+      for (const d of dimensionKeys) {
         const v = p.values[d]
         if (v !== undefined) latest[d] = v
       }
     }
 
-    const values = DIMENSIONS.map((d) => latest[d]).filter(
+    const values = dimensionKeys.map((d) => latest[d]).filter(
       (v): v is number => v !== undefined,
     )
     const mean =
@@ -98,7 +110,7 @@ export function buildCohortRows(input: {
     // plateau detector uses, so the two never tell different stories.
     const windowPoints = points.slice(Math.max(0, points.length - PLATEAU.window))
     const dimensionSlopes: number[] = []
-    for (const d of DIMENSIONS) {
+    for (const d of dimensionKeys) {
       const series: Array<{ t: number; v: number }> = []
       for (const p of windowPoints) {
         const v = p.values[d]

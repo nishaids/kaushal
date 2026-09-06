@@ -416,6 +416,8 @@ export function createLocalDriver(): DataDriver {
       notes?: string | null
       isCalibration?: boolean
       metrics?: ImageMetrics | null
+      difficulty?: number | null
+      quality?: Work['quality']
     }) {
       const s = await load()
       if (!findStudent(s, input.academyId, input.studentId)) throw notFound('Student')
@@ -429,6 +431,8 @@ export function createLocalDriver(): DataDriver {
         assignment_id: input.assignmentId ?? null,
         notes: input.notes ?? null,
         is_calibration: input.isCalibration ?? false,
+        difficulty: input.difficulty ?? null,
+        quality: input.quality ?? null,
         metrics: input.metrics ?? null,
         created_at: created,
       }
@@ -688,6 +692,7 @@ export function createLocalDriver(): DataDriver {
         id: randomUUID(),
         student_id: input.studentId,
         target_dimension: input.targetDimension,
+        difficulty: input.difficulty ?? 1,
         brief: input.brief,
         issued_at: null,
         completed: false,

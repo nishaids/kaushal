@@ -1,34 +1,129 @@
 import { z } from 'zod'
-import { DIMENSIONS, SCORE_MAX, SCORE_MIN } from '../rubric'
+import { DIMENSIONS, type Dimension } from '../rubric'
 
 /**
  * Every model call in KAUSHAL is schema-forced and Zod-validated. A response
  * that does not parse is retried exactly once with the parse error appended to
  * the prompt; a second failure falls through to the deterministic scorer. No
  * call is allowed to hang the UI or return prose we then regex at.
+ *
+ * The score schemas are built per rubric rather than declared once. Dimensions
+ * are academy-defined now, so the only correct enum is the one belonging to the
+ * rubric the work is actually being assessed against — and constraining the
+ * model to exactly those keys is what stops it inventing a sixth dimension or
+ * quietly answering with the drawing keys it saw more of in training.
  */
 
-const dimensionEnum = z.enum(DIMENSIONS)
+/* ------------------------------------------------------------------ *
+ * Scoring — built from a rubric
+ * ------------------------------------------------------------------ */
 
-export const scoreProposalSchema = z.object({
-  dimension: dimensionEnum,
-  score: z.number().int().min(SCORE_MIN).max(SCORE_MAX),
-  rationale: z
-    .string()
-    .min(12)
-    .max(240)
-    .describe('One sentence about what is visible in this image.'),
-  confidence: z.number().min(0).max(1),
+export interface ScoreSchemaSpec {
+  /** The keys the model is allowed to answer with, in rubric order. */
+  keys: Dimension[]
+  /** Scale bounds. A rubric may use 1–4 or 0–100 rather than 1–10. */
+  min: number
+  max: number
+}
+
+/**
+ * A proposal carries its own uncertainty, not just a number.
+ *
+ * `evidence` is what the model claims to have seen, `ambiguity` is the reading
+ * under which its own score would be wrong. Requiring the second one is the
+ * cheapest honesty mechanism available: a model that cannot name a competing
+ * interpretation is usually one that has not looked hard enough.
+ */
+export function buildScoreProposalSchema(spec: ScoreSchemaSpec) {
+  const keys = spec.keys.length > 0 ? spec.keys : DIMENSIONS
+  const dimensionEnum = z.enum(keys as [string, ...string[]])
+  return z.object({
+    dimension: dimensionEnum,
+    score: z.number().min(spec.min).max(spec.max),
+    rationale: z
+      .string()
+      .min(12)
+      .max(280)
+      .describe('One sentence about what is actually present in this submission.'),
+    evidence: z
+      .string()
+      .max(280)
+      .optional()
+      .describe('The specific thing in the work that supports the score.'),
+    ambiguity: z
+      .string()
+      .max(280)
+      .optional()
+      .describe('A reading of the work under which this score would be wrong.'),
+    confidence: z.number().min(0).max(1),
+  })
+}
+
+export function buildScoreResponseSchema(spec: ScoreSchemaSpec) {
+  const keys = spec.keys.length > 0 ? spec.keys : DIMENSIONS
+  return z.object({
+    scores: z.array(buildScoreProposalSchema(spec)).min(1).max(keys.length),
+    subject: z
+      .string()
+      .min(2)
+      .max(160)
+      .describe('What the model believes it is looking at. Shown to the instructor.'),
+  })
+}
+
+/** The JSON Schema mirror handed to the provider, built from the same spec. */
+export function buildScoreJsonSchema(spec: ScoreSchemaSpec) {
+  const keys = spec.keys.length > 0 ? spec.keys : DIMENSIONS
+  return {
+    type: 'object',
+    properties: {
+      subject: { type: 'string' },
+      scores: {
+        type: 'array',
+        minItems: 1,
+        maxItems: keys.length,
+        items: {
+          type: 'object',
+          properties: {
+            dimension: { type: 'string', enum: keys },
+            score: { type: 'number', minimum: spec.min, maximum: spec.max },
+            rationale: { type: 'string' },
+            evidence: { type: 'string' },
+            ambiguity: { type: 'string' },
+            confidence: { type: 'number', minimum: 0, maximum: 1 },
+          },
+          required: ['dimension', 'score', 'rationale', 'confidence'],
+        },
+      },
+    },
+    required: ['subject', 'scores'],
+  } as const
+}
+
+export type ScoreProposal = z.infer<ReturnType<typeof buildScoreProposalSchema>>
+export type ScoreResponse = z.infer<ReturnType<typeof buildScoreResponseSchema>>
+
+/**
+ * The default-rubric schemas, for call sites that have not been handed a rubric
+ * yet. These assume the drawing scale.
+ */
+export const scoreResponseSchema = buildScoreResponseSchema({
+  keys: DIMENSIONS,
+  min: 1,
+  max: 10,
+})
+export const scoreJsonSchema = buildScoreJsonSchema({
+  keys: DIMENSIONS,
+  min: 1,
+  max: 10,
 })
 
-export const scoreResponseSchema = z.object({
-  scores: z.array(scoreProposalSchema).length(DIMENSIONS.length),
-  /** What the model believes it is looking at. Shown to the instructor. */
-  subject: z.string().min(2).max(120),
-})
+/* ------------------------------------------------------------------ *
+ * Assignments and reports — dimension keys are free strings, validated
+ * by the caller against the rubric it is working with.
+ * ------------------------------------------------------------------ */
 
-export type ScoreResponse = z.infer<typeof scoreResponseSchema>
-export type ScoreProposal = z.infer<typeof scoreProposalSchema>
+const dimensionKey = z.string().min(1).max(64)
 
 export const assignmentResponseSchema = z.object({
   title: z.string().min(4).max(90),
@@ -45,44 +140,15 @@ export const reportResponseSchema = z.object({
   headline: z.string().min(8).max(120),
   summary: z.string().min(60).max(1400),
   improved: z
-    .array(z.object({ dimension: dimensionEnum, note: z.string().min(10).max(280) }))
-    .max(5),
+    .array(z.object({ dimension: dimensionKey, note: z.string().min(10).max(280) }))
+    .max(8),
   focus: z
-    .array(z.object({ dimension: dimensionEnum, note: z.string().min(10).max(280) }))
-    .max(3),
+    .array(z.object({ dimension: dimensionKey, note: z.string().min(10).max(280) }))
+    .max(4),
   next_steps: z.array(z.string().min(8).max(220)).min(1).max(4),
 })
 
 export type ReportResponse = z.infer<typeof reportResponseSchema>
-
-/* ------------------------------------------------------------------ *
- * JSON Schema mirrors handed to the providers. Gemini takes
- * responseSchema, Groq takes json_schema in response_format. Kept beside
- * the Zod so the two can never drift silently.
- * ------------------------------------------------------------------ */
-
-export const scoreJsonSchema = {
-  type: 'object',
-  properties: {
-    subject: { type: 'string' },
-    scores: {
-      type: 'array',
-      minItems: 5,
-      maxItems: 5,
-      items: {
-        type: 'object',
-        properties: {
-          dimension: { type: 'string', enum: [...DIMENSIONS] },
-          score: { type: 'integer', minimum: SCORE_MIN, maximum: SCORE_MAX },
-          rationale: { type: 'string' },
-          confidence: { type: 'number', minimum: 0, maximum: 1 },
-        },
-        required: ['dimension', 'score', 'rationale', 'confidence'],
-      },
-    },
-  },
-  required: ['subject', 'scores'],
-} as const
 
 export const assignmentJsonSchema = {
   type: 'object',
@@ -119,7 +185,7 @@ export const reportJsonSchema = {
       items: {
         type: 'object',
         properties: {
-          dimension: { type: 'string', enum: [...DIMENSIONS] },
+          dimension: { type: 'string' },
           note: { type: 'string' },
         },
         required: ['dimension', 'note'],
@@ -130,7 +196,7 @@ export const reportJsonSchema = {
       items: {
         type: 'object',
         properties: {
-          dimension: { type: 'string', enum: [...DIMENSIONS] },
+          dimension: { type: 'string' },
           note: { type: 'string' },
         },
         required: ['dimension', 'note'],

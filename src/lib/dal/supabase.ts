@@ -164,6 +164,8 @@ interface WorkRow {
   is_calibration: boolean
   metrics: unknown
   created_at: string
+  difficulty?: number | null
+  quality?: unknown
 }
 
 interface ScoreRow {
@@ -201,6 +203,7 @@ interface AssignmentRow {
   issued_at: string | null
   completed: boolean
   created_at: string
+  difficulty?: number | null
 }
 
 interface AlertRow {
@@ -373,6 +376,8 @@ function mapWork(r: WorkRow): Work {
     captured_at: r.captured_at,
     assignment_id: r.assignment_id,
     notes: r.notes,
+    difficulty: typeof r.difficulty === 'number' ? r.difficulty : null,
+    quality: (r.quality as Work['quality']) ?? null,
     is_calibration: r.is_calibration,
     metrics: asMetrics(r.metrics),
     created_at: r.created_at,
@@ -423,6 +428,7 @@ function mapAssignment(r: AssignmentRow): Assignment {
     id: r.id,
     student_id: r.student_id,
     target_dimension: asDimension(r.target_dimension),
+    difficulty: typeof r.difficulty === 'number' ? r.difficulty : 1,
     brief: asBrief(r.brief),
     issued_at: r.issued_at,
     completed: r.completed,

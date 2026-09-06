@@ -17,7 +17,7 @@ function work(
   id: string,
   weeksAgoFromStart: number,
   values: Partial<Record<Dimension, number>>,
-  opts: { confirmed?: boolean; startWeeksAgo?: number } = {},
+  opts: { confirmed?: boolean; startWeeksAgo?: number; difficulty?: number } = {},
 ): ScoredWork {
   const startWeeksAgo = opts.startWeeksAgo ?? 13
   const at = new Date(
@@ -49,6 +49,8 @@ function work(
     assignment_id: null,
     notes: null,
     is_calibration: false,
+    difficulty: opts.difficulty ?? null,
+    quality: null,
     metrics: null,
     created_at: at,
     scores,

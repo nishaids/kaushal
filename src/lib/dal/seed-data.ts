@@ -1032,6 +1032,8 @@ export function buildSeed(now: Date = new Date()): SeedBundle {
         assignment_id: null,
         notes,
         is_calibration: false,
+        difficulty: null,
+        quality: null,
         metrics: buildMetrics(values, rng(0xfeed0000 + workSeq)),
         created_at: capturedAt,
       }
@@ -1114,6 +1116,8 @@ export function buildSeed(now: Date = new Date()): SeedBundle {
       assignment_id: null,
       notes: `Calibration anchor ${i + 1} of ${CALIBRATION_ANCHORS.length}.`,
       is_calibration: true,
+      difficulty: null,
+      quality: null,
       metrics: buildMetrics(values, rng(0xba5e0000 + i)),
       created_at: capturedAt,
     })
@@ -1167,6 +1171,7 @@ export function buildSeed(now: Date = new Date()): SeedBundle {
       id: seedId(BUCKET.assignment, i + 1),
       student_id: target.id,
       target_dimension: spec.dimension,
+      difficulty: 1,
       brief: BRIEFS[spec.dimension],
       issued_at: spec.issuedDaysAgo === null ? null : at(now, spec.issuedDaysAgo, 9),
       completed: spec.completed,

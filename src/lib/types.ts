@@ -48,6 +48,17 @@ export interface Work {
   notes: string | null
   /** True when this work is one of the 10 onboarding calibration anchors. */
   is_calibration: boolean
+  /**
+   * How hard this task was, relative to the student's usual work.
+   *
+   * 1 is their baseline. 2 is a clear step up. Analytics adjusts for this before
+   * reporting a trend, because a student who attempts something harder and
+   * scores lower has stretched, not declined — and reporting that as a decline
+   * punishes exactly the behaviour teaching is trying to produce.
+   */
+  difficulty: number | null
+  /** Quality of the submitted media, measured before assessment. */
+  quality: WorkQuality | null
   /** Deterministic pixel statistics measured at upload. See lib/metrics. */
   metrics: ImageMetrics | null
   created_at: string
@@ -68,10 +79,60 @@ export interface Score {
   confirmed_score: number | null
   confirmed_by: string | null
   confirmed_at: string | null
+  /** What the model claimed to have seen. */
+  ai_evidence?: string | null
+  /** A reading under which the model's own score would be wrong. */
+  ai_ambiguity?: string | null
+  /** The rubric version this score was given under. */
+  rubric_version?: number | null
+  /**
+   * Every proposal and every override, oldest first. Append-only.
+   * Empty on rows written before provenance was recorded.
+   */
+  revisions?: ScoreRevision[]
   created_at: string
 }
 
 export type ScoreSource = 'gemini' | 'measured' | 'manual' | 'cached'
+
+/**
+ * A snapshot of the media quality gate's verdict, stored on the work.
+ *
+ * Kept as a record rather than recomputed, so a score can always be read
+ * alongside the quality of the evidence it was built on — including months
+ * later, when the original file may have been re-encoded.
+ */
+export interface WorkQuality {
+  verdict: 'good' | 'usable' | 'retake'
+  score: number
+  /** Whether a model was allowed to propose against this media. */
+  assessable: boolean
+  issues: Array<{ code: string; severity: 'blocking' | 'warning'; message: string }>
+}
+
+/**
+ * One entry in a score's history.
+ *
+ * A proposal is never overwritten. When a model re-scores, or an instructor
+ * changes their mind, a new revision is appended and the previous one stays
+ * readable. Without this the product cannot answer "what did the model say
+ * before the teacher corrected it?", which is the question its own evaluation
+ * depends on.
+ */
+export interface ScoreRevision {
+  at: string
+  /** Who or what produced this revision. */
+  actor: 'model' | 'instructor'
+  actor_id: string | null
+  value: number | null
+  source: ScoreSource
+  rationale: string | null
+  confidence: number | null
+  /** Present on model revisions that offered a competing reading. */
+  ambiguity?: string | null
+  /** Rubric version this revision was made under. */
+  rubric_version?: number | null
+}
 
 export interface Calibration {
   id: string
@@ -86,6 +147,8 @@ export interface Assignment {
   id: string
   student_id: string
   target_dimension: Dimension
+  /** Relative to the student's baseline. Carried onto the work submitted for it. */
+  difficulty: number
   /** Instructor-editable brief. Stored after they edit, not before. */
   brief: AssignmentBrief
   issued_at: string | null
