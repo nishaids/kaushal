@@ -14,6 +14,7 @@ import {
   type CompressResult,
 } from '@/lib/utils/compress'
 import { createWorkAndScore, confirmScoreAction, confirmAllScoresAction } from '@/lib/actions/scores'
+import { assessQuality, type QualityReport } from '@/lib/metrics/quality-gate'
 import { kb } from '@/lib/utils/format'
 import { cn } from '@/lib/utils/cn'
 import { Button, ButtonLink } from '@/components/ui/button'
@@ -22,6 +23,7 @@ import { Plate, Rule } from '@/components/ui/plate'
 import { ErrorState, SkeletonBlock } from '@/components/ui/states'
 import { ScoreReview } from '@/components/score/score-review'
 import { Dropzone } from './dropzone'
+import { QualityNotice } from './quality-notice'
 import { StudentPicker } from './student-picker'
 
 /**
@@ -32,7 +34,7 @@ import { StudentPicker } from './student-picker'
  * five numbers and confirm.
  */
 
-type Stage = 'idle' | 'compressing' | 'scoring' | 'review' | 'failed'
+type Stage = 'idle' | 'compressing' | 'checking' | 'scoring' | 'review' | 'failed'
 
 /** After this long the model has effectively failed, whatever it is doing. */
 const PATIENCE_MS = 25_000
@@ -54,6 +56,7 @@ export function CaptureFlow({
   const [notes, setNotes] = useState('')
   const [stage, setStage] = useState<Stage>('idle')
   const [image, setImage] = useState<CompressResult | null>(null)
+  const [quality, setQuality] = useState<QualityReport | null>(null)
   const [work, setWork] = useState<ScoredWork | null>(null)
   const [degraded, setDegraded] = useState<string | null>(null)
   const [subject, setSubject] = useState<string | null>(null)
@@ -70,6 +73,7 @@ export function CaptureFlow({
     if (patience.current) window.clearTimeout(patience.current)
     setStage('idle')
     setImage(null)
+    setQuality(null)
     setWork(null)
     setDegraded(null)
     setSubject(null)
@@ -79,6 +83,50 @@ export function CaptureFlow({
     setAssignmentId('')
     if (!keepStudent) setStudentId(null)
   }, [])
+
+  const score = useCallback(
+    async (compressed: CompressResult, report: QualityReport) => {
+      if (!studentId) return
+      setStage('scoring')
+      patience.current = window.setTimeout(() => setSlow(true), PATIENCE_MS)
+
+      const res = await createWorkAndScore({
+        studentId,
+        imageUrl: compressed.dataUrl,
+        thumbUrl: compressed.thumbDataUrl,
+        metrics: compressed.metrics,
+        imageBase64: compressed.dataUrl,
+        mimeType: 'image/jpeg',
+        notes: notes.trim() || null,
+        assignmentId: assignmentId || null,
+        quality: {
+          verdict: report.verdict,
+          score: report.score,
+          assessable: report.assessable,
+          issues: report.issues.map((i) => ({
+            code: i.code,
+            severity: i.severity,
+            message: i.message,
+          })),
+        },
+      })
+
+      if (patience.current) window.clearTimeout(patience.current)
+      setSlow(false)
+
+      if (res.ok) {
+        setWork(res.data.work)
+        setDegraded(res.data.degradedNote)
+        setSubject(res.data.subject)
+        setStage('review')
+        router.refresh()
+      } else {
+        setStage('failed')
+        setError({ message: res.error, hint: res.hint })
+      }
+    },
+    [studentId, notes, assignmentId, router],
+  )
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -119,38 +167,24 @@ export function CaptureFlow({
         return
       }
 
-      setStage('scoring')
-      patience.current = window.setTimeout(() => setSlow(true), PATIENCE_MS)
-
-      const res = await createWorkAndScore({
-        studentId,
-        imageUrl: compressed.dataUrl,
-        thumbUrl: compressed.thumbDataUrl,
-        metrics: compressed.metrics,
-        imageBase64: compressed.dataUrl,
-        mimeType: 'image/jpeg',
-        notes: notes.trim() || null,
-        assignmentId: assignmentId || null,
-      })
-
-      if (patience.current) window.clearTimeout(patience.current)
-      setSlow(false)
-
-      if (res.ok) {
-        setWork(res.data.work)
-        setDegraded(res.data.degradedNote)
-        setSubject(res.data.subject)
-        setStage('review')
-        router.refresh()
-      } else {
-        setStage('failed')
-        setError({ message: res.error, hint: res.hint })
+      // The gate runs on measurements the compression step already produced.
+      // A blocked photo stops here: it is still uploaded and still scoreable by
+      // hand, it just does not get a proposal built on evidence we have already
+      // measured as unreliable.
+      const report = assessQuality(compressed.metrics)
+      setQuality(report)
+      if (!report.assessable) {
+        setStage('checking')
+        return
       }
+
+      await score(compressed, report)
     },
-    [studentId, notes, assignmentId, router],
+    [studentId, score],
   )
 
   const busy = stage === 'compressing' || stage === 'scoring'
+  const blocked = stage === 'checking' && quality !== null
   const confirmedCount =
     work?.scores.filter((s) => s.confirmed_score !== null).length ?? 0
   const allConfirmed = work !== null && confirmedCount === 5
@@ -232,6 +266,20 @@ export function CaptureFlow({
               </div>
             </dl>
           </Plate>
+        ) : null}
+
+        {quality && stage !== 'idle' ? (
+          <QualityNotice
+            report={quality}
+            onRetake={blocked ? () => reset(true) : undefined}
+            onUseAnyway={
+              blocked && image
+                ? () => {
+                    void score(image, { ...quality, assessable: false })
+                  }
+                : undefined
+            }
+          />
         ) : null}
 
         {!studentId ? (
@@ -326,6 +374,24 @@ export function CaptureFlow({
                     </p>
                   </div>
                 ) : null}
+              </Plate>
+            </motion.div>
+          ) : blocked ? (
+            <motion.div
+              key="blocked"
+              initial={reduce ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: reduce ? 0 : 0.18 }}
+            >
+              <Plate tone="recessed" className="p-6 sm:p-8">
+                <h2 className="text-lg text-v9">Nothing scored from this photo</h2>
+                <p className="font-language mt-2 max-w-[54ch] text-base text-v6">
+                  The checks on the left would make any proposal unreliable, so
+                  KAUSHAL has not made one. Take the photo again and it will score
+                  normally — or keep this one and set the five scores yourself,
+                  which records them as yours the same as any confirmed score.
+                </p>
               </Plate>
             </motion.div>
           ) : stage === 'failed' ? (

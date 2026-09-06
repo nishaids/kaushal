@@ -5,7 +5,14 @@ import { z } from 'zod'
 import { db } from '@/lib/dal'
 import { requireSession } from '@/lib/session'
 import { DIMENSIONS, clampScore, isDimension, type Dimension } from '@/lib/rubric'
-import { fail, ok, type ActionResult, type ImageMetrics, type ScoredWork } from '@/lib/types'
+import {
+  fail,
+  ok,
+  type ActionResult,
+  type ImageMetrics,
+  type ScoredWork,
+  type WorkQuality,
+} from '@/lib/types'
 import { proposeScores, toProposedScores } from '@/lib/ai'
 import { refreshAlertsFor } from './alerts'
 
@@ -121,6 +128,8 @@ export interface CreateWorkInput {
   /** The compressed data URL the browser already holds. Never re-fetched. */
   imageBase64?: string | null
   mimeType?: string | null
+  /** Verdict from the media quality gate, measured in the browser. */
+  quality?: WorkQuality | null
 }
 
 /**
@@ -167,6 +176,7 @@ export async function createWorkAndScore(
       notes: input.notes ?? null,
       isCalibration: input.isCalibration ?? false,
       metrics: input.metrics ?? null,
+      quality: input.quality ?? null,
     })
     workId = work.id
 
@@ -175,11 +185,18 @@ export async function createWorkAndScore(
       ? await driver.getAssignment(session.academy.id, input.assignmentId)
       : null
 
+    // A photo the quality gate blocked is stored and scoreable by hand, but is
+    // never sent for a proposal: a score resting on evidence already measured as
+    // unreliable is worse than no score at all.
+    const gateBlocked = input.quality?.assessable === false
+
     const outcome = await proposeScores({
       discipline: session.academy.discipline,
       anchors,
       metrics: input.metrics ?? null,
-      imageBase64: input.imageBase64 ?? asDataUrl(work.image_url),
+      imageBase64: gateBlocked
+        ? null
+        : (input.imageBase64 ?? asDataUrl(work.image_url)),
       mimeType: input.mimeType ?? null,
       notes: input.notes ?? null,
       assignmentBrief: assignment?.brief ?? null,
@@ -197,7 +214,11 @@ export async function createWorkAndScore(
 
     return ok({
       work: stored ?? { ...work, scores: [] },
-      degradedNote: outcome.degraded ? (outcome.note ?? null) : null,
+      degradedNote: gateBlocked
+        ? 'This photo did not pass the quality check, so no proposal was made from it. Set the scores yourself, or record the work again with a better photo.'
+        : outcome.degraded
+          ? (outcome.note ?? null)
+          : null,
       subject: outcome.response.subject ?? null,
     })
   } catch {

@@ -9,6 +9,8 @@ import {
 } from '@/lib/analytics/cohort'
 import type { Alert, CohortRow, ScoredWork } from '@/lib/types'
 import { asAlerts, deriveAlerts } from '@/lib/analytics/alerts'
+import { buildAttentionBoard } from '@/lib/analytics/attention'
+import { AttentionBoardView } from '@/components/cohort/attention-board'
 import { CALIBRATION_HOLDER_NAME, DORMANT_DAYS } from '@/lib/constants'
 import { PageHeader, Plate, Rule, Stat } from '@/components/ui/plate'
 import { EmptyState } from '@/components/ui/states'
@@ -71,6 +73,14 @@ export default async function CohortPage({
   // and must never appear in a cohort the instructor is triaging.
   const roster = students.filter((s) => s.name !== CALIBRATION_HOLDER_NAME)
 
+  // The board answers "where do I start"; the table below answers "how is
+  // everyone doing". Both read the same signals, so they can never disagree.
+  const board = buildAttentionBoard({
+    students: roster,
+    worksByStudent,
+    now,
+  })
+
   const allRows = buildCohortRows({
     students: roster,
     worksByStudent,
@@ -109,6 +119,10 @@ export default async function CohortPage({
           </div>
         }
       />
+
+      <div className="border-b border-v3 bg-v1 px-5 py-7 sm:px-8">
+        <AttentionBoardView board={board} instructorName={session.instructor.name} />
+      </div>
 
       <div className="border-b border-v3 bg-v0">
         <div className="grid grid-cols-2 gap-x-6 gap-y-6 px-5 py-6 sm:px-8 lg:grid-cols-4">
